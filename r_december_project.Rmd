@@ -1,0 +1,184 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r echo=TRUE}
+library("magrittr")
+library("dplyr")
+library("tuber")
+library('stringr')
+library("wordcloud")
+library("tm")
+library('jsonlite')
+library('textclean')
+library('ggplot2')
+```
+
+
+```{r}
+cred <- read_json('./credentials.json')
+yt_oauth(cred[1], cred[2], token = '')
+```
+
+```{r}
+a <- list_channel_resources(filter = c(channel_id = "UCfbKC4afdT60qQxs0-TxhDA"), part="contentDetails")
+playlist_id <- a$items[[1]]$contentDetails$relatedPlaylists$uploads
+vids <- get_playlist_items(filter= c(playlist_id=playlist_id), max_results=50000) 
+write.csv(vids[5:6], file = "list_of_videos.csv")
+vid_ids <- as.vector(vids$contentDetails.videoId)
+```
+
+```{r}
+load_video_info <- function(video_id){
+  stats_vid <- get_stats(video_id = video_id)
+  details <- get_video_details(video_id = video_id)$items[[1]]
+  snippet <- details$snippet
+  snippet_data <- c(
+    publishedAt=snippet$publishedAt,
+    title=snippet$title,
+    description=snippet$description
+  )
+  df_tags <- data.frame(vid=rep(video_id, length(snippet$tags)))
+  df_tags$tag <- snippet$tags
+  details2 <- get_video_details(video_id = video_id, part="contentDetails")$items[[1]]$contentDetails$duration
+  duration <- c(duration=details2)
+  df_row <- as.data.frame(c(stats_vid, snippet_data, duration))
+  if (typeof(df_row$commentCount) == "NULL"){
+    df_row$commentCount <- -1
+  }
+  tryCatch(
+    {
+      df_comments <- get_all_comments(video_id = video_id)
+    },
+    error=function(e){
+      df_comments = data.frame()
+    }
+  )
+  return(list('df_row' = df_row, 'df_comments' = df_comments, 'df_tags' = df_tags))
+}
+```
+
+
+Если мы только начали скачивать:
+
+```{r}
+df_video_meta <- data.frame()
+df_comments <- data.frame()
+df_tags <- data.frame()
+```
+
+Если надо продолжить:
+```{r}
+df_video_meta <- read.table(file = "/home/dkbrz/github/r_december_project/df_video_meta.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
+df_comments <- read.table(file = "/home/dkbrz/github/r_december_project/df_comments.tsv", sep=";", stringsAsFactors = FALSE, header = TRUE)[-c(1)]
+df_tags <- read.table(file = "/home/dkbrz/github/r_december_project/df_tags.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
+vid_ids <- read.csv(file='/home/dkbrz/github/r_december_project/not_seen_vid_ids.txt', stringsAsFactors = FALSE)$x
+```
+
+
+
+```{r error=FALSE, results='hide'}
+for (vid in vid_ids){
+  tryCatch(
+    {
+      res <- load_video_info(video_id=vid)
+      df_video_meta <- rbind(df_video_meta, res$df_row)
+      tryCatch(
+        {
+          print(c('INNER', dim(res$df_comments)))
+          if (!(dim(res$df_comments)[1] == dim(df_comments)[1])){
+              df_comments <- rbind(df_comments, res$df_comments)
+              print(c('INNER-2', dim(res$df_comments)))
+          }
+        },
+        error=function(e){
+          print(c('ERR', dim(df_comments), dim(res$df_comments)))
+        }
+      )
+      if (length(res$df_tags) == 2) {
+        df_tags <- rbind(df_tags, res$df_tags)
+        print(c('ok', vid, dim(df_comments)))
+      } else {
+        print(c('ok', vid, 'no tags', dim(df_comments)))
+      }
+    },
+    error=function(e){
+      print(c('ERROR', vid, e))
+      # stop()
+    }
+  )
+}
+```
+
+
+
+```{r error=FALSE}
+seen_vid <- unique(df_comments$videoId)
+not_seen <- vid_ids[! vid_ids %in% seen_vid]
+vid_ids <- not_seen
+```
+
+```{r}
+write.csv(not_seen, file='not_seen_vid_ids.txt')
+write.table(df_video_meta, file = "df_video_meta.tsv", sep="\t")
+write.csv2(df_comments, file = "df_comments.tsv")
+foo = data.frame(vid = as.vector(df_tags$vid)) %>% mutate(tag=as.vector(df_tags$tag) %>% unlist())
+write.table(foo, file = "df_tags.tsv", sep='\t')
+```
+
+```{r}
+df_m <- read.table(file = "df_video_meta2.csv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
+df_c <- read.csv2(file = "df_comments.tsv", stringsAsFactors = FALSE, header = TRUE)
+df_t <- read.table(file = "df_tags.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
+```
+
+```{r}
+ggplot(data = df_m, mapping = aes(x = sapply(likeCount, log), y = sapply(dislikeCount, log))) +
+  ggtitle('Уровень оценок') +
+  geom_point() +
+  # xlim(0, 16000) +
+  # ylim(0, 16000) +
+  theme_light() + 
+  xlab('Кол-во лайков (ln)') +
+  ylab('Кол-во дизлайков (ln)')
+  
+```
+
+```{r}
+mystem <- function(doc) {
+  sdoc <- system('./mystem -ld ', intern=T, input=doc)
+  sdoc <- str_replace_all(sdoc, '[\\{\\}\\?]', ' ')
+  return(sdoc)
+}
+```
+
+```{r}
+mystem('Обзор моих заграничных покупок!	')
+```
+
+
+```{r}
+df_m$mystemmed = lapply(df_m$title, replace_url)
+df_m$mystemmed = lapply(df_m$mystemmed, mystem)
+```
+
+```{r}
+set.seed(23)
+docs <- Corpus(VectorSource(df_m$mystemmed))
+docs <- tm_map(docs, removeWords, stopwords("russian"))
+dtm <- TermDocumentMatrix(docs)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m), decreasing=TRUE)
+d <- data.frame(word = names(v), freq=v )
+# d <- d[-c(1,2), ]
+head(d, 10)
+```
+
+```{r, fig.width=10, fig.height=10}
+set.seed(23)
+wordcloud(words = d$word, freq = d$freq, min.freq = 1, scale=c(7, 1),
+          max.words=100, random.order=FALSE, random.color = TRUE,
+          colors=brewer.pal(8, "Dark2"))
+```
+
