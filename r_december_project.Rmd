@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r echo=TRUE}
@@ -13,6 +15,7 @@ library("tm")
 library('jsonlite')
 library('textclean')
 library('ggplot2')
+library('RSQLite')
 ```
 
 
@@ -70,15 +73,15 @@ df_tags <- data.frame()
 
 Если надо продолжить:
 ```{r}
-df_video_meta <- read.table(file = "/home/dkbrz/github/r_december_project/df_video_meta.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
 df_comments <- read.table(file = "/home/dkbrz/github/r_december_project/df_comments.tsv", sep=";", stringsAsFactors = FALSE, header = TRUE)[-c(1)]
 df_tags <- read.table(file = "/home/dkbrz/github/r_december_project/df_tags.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
 vid_ids <- read.csv(file='/home/dkbrz/github/r_december_project/not_seen_vid_ids.txt', stringsAsFactors = FALSE)$x
+df_video_meta <- read.table(file = "/home/dkbrz/github/r_december_project/df_video_meta.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
 ```
 
 
 
-```{r error=FALSE, results='hide'}
+```
 for (vid in vid_ids){
   tryCatch(
     {
@@ -128,7 +131,7 @@ write.table(foo, file = "df_tags.tsv", sep='\t')
 ```
 
 ```{r}
-df_m <- read.table(file = "df_video_meta2.csv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
+df_m <- read.table(file = "df_video_meta.csv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
 df_c <- read.csv2(file = "df_comments.tsv", stringsAsFactors = FALSE, header = TRUE)
 df_t <- read.table(file = "df_tags.tsv", sep="\t", stringsAsFactors = FALSE, header = TRUE)
 ```
@@ -182,3 +185,229 @@ wordcloud(words = d$word, freq = d$freq, min.freq = 1, scale=c(7, 1),
           colors=brewer.pal(8, "Dark2"))
 ```
 
+```{r}
+db <- dbConnect(SQLite(), './a_plus_mama/test_db.db')
+```
+
+Нужно преобразовать дату в числовой формат, чтобы было удобно использовать в базе
+
+```{r}
+weekdays(strptime("2018-03-06T14:38:25.000Z", "%Y-%m-%dT%H:%M:%S"))
+datetimes <- lapply(
+  df_m$publishedAt,
+  function(x){return(strptime(x, "%Y-%m-%dT%H:%M:%S"))}
+)
+df_m$year <- lapply(datetimes, function(x){return(as.numeric(format(x, "%Y")))}) 
+df_m$month <- lapply(datetimes, function(x){return(as.numeric(format(x, "%m")))})
+df_m$day <- lapply(datetimes, function(x){return(as.numeric(format(x, "%d")))})
+df_m$hour <- lapply(datetimes, function(x){return(as.numeric(format(x, "%H")))}) 
+df_m$minute <-lapply(datetimes, function(x){return(as.numeric(format(x, "%M")))}) 
+df_m$second <- lapply(datetimes, function(x){return(as.numeric(format(x, "%S")))}) 
+df_m$weekday <- lapply(datetimes, weekdays) 
+```
+
+Трансформируем данные о длительности (переводим в секунды)
+
+```{r eval=FALSE}
+find_time <- function(string){
+  if (grepl("H", string)){
+    time <- strptime(string, "PT%HH%MM%SS")
+  } else {
+    if (grepl("S", string)){
+      if (grepl("M", string)){
+        time <- strptime(string, "PT%MM%SS")
+      } else {
+        time <- strptime(string, "PT%SS")
+      }
+      
+    } else {
+      time <- strptime(string, "PT%MM")
+    }
+  }
+  return (time)
+}
+
+timings <- lapply(df_m$duration, find_time)
+total <- 60 * sapply(timings, function(x){return(as.numeric(format(x, "%H")))})
+total <- 60 * (total + sapply(timings, function(x){return(as.numeric(format(x, "%M")))}))
+total <- total + sapply(timings, function(x){return(as.numeric(format(x, "%S")))})
+
+df_m$duration_int <- total
+```
+
+```{r}
+df_m$duration_int <- as.integer(df_m$duration_int)
+df_m$year <- as.integer(df_m$year)
+df_m$month <- as.integer(df_m$month)
+df_m$day <- as.integer(df_m$day)
+df_m$hour <- as.integer(df_m$hour)
+df_m$minute <- as.integer(df_m$minute)
+df_m$second <- as.integer(df_m$second)
+df_m$weekday <- as.character(df_m$weekday)
+
+```
+
+Сохраняем в базу то, что получилось
+
+```{r}
+dbWriteTable(db, "video_meta", df_m)
+```
+
+Вторые две таблицы нужно сохранить более экономно (без многих повторов), но это очень сложно в R, поэтому запишем как есть, а потом с помощью запросов соберем хорошую базу.
+
+```{r}
+dbWriteTable(db, "comments_junk", df_c)
+dbWriteTable(db, "tags_junk", df_t)
+```
+
+Что нужно сделать:
+
+- вынести авторов отдельно (и удалить ненужные столбцы), вместо информации привязать просто по ID
+- создать таблицу тегов (id, tag) и превратить прежнюю таблицу с тегами в связующую вида id_video, id_tag
+
+```{sql connection=}
+CREATE TABLE `authors` (
+	`id`	INTEGER PRIMARY KEY AUTOINCREMENT,
+	`youtube_id`	TEXT,
+	`name`	TEXT
+);
+```
+
+```{sql connection=}
+INSERT INTO authors (youtube_id, name)
+SELECT DISTINCT `authorChannelId.value` as youtube_id, authorDisplayName as name
+FROM comments_junk;
+```
+
+Переименовываем и убираем некоторые столбцы
+
+```{r}
+data <- dbGetQuery(
+  db,
+  "SELECT
+  	comments_junk.id as id,
+  	authors.id as author, 
+  	video_meta.id as video_id,
+  	comments_junk.textOriginal as text,
+  	comments_junk.likeCount as likes,
+  	comments_junk.youtube_id as youtube_id,
+  	comments_junk.publishedAt as publishedAt,
+  	comments_junk.updatedAt as updatedAt,
+  	comments_junk.moderationStatus as moderationStatus
+  FROM comments_junk
+  	JOIN authors ON authors.youtube_id = comments_junk.authorChannelId
+  	JOIN video_meta ON comments_junk.videoId = video_meta.youtube_id"
+)
+```
+
+Преобразуем дату в отдельные числа примерно как делали до этого со врме
+
+```{r}
+datetimes <- lapply(
+  data$publishedAt,
+  function(x){return(strptime(x, "%Y-%m-%dT%H:%M:%S"))}
+)
+data$year <- lapply(datetimes, function(x){return(as.numeric(format(x, "%Y")))}) 
+data$month <- lapply(datetimes, function(x){return(as.numeric(format(x, "%m")))})
+data$day <- lapply(datetimes, function(x){return(as.numeric(format(x, "%d")))})
+data$hour <- lapply(datetimes, function(x){return(as.numeric(format(x, "%H")))}) 
+data$minute <-lapply(datetimes, function(x){return(as.numeric(format(x, "%M")))}) 
+data$second <- lapply(datetimes, function(x){return(as.numeric(format(x, "%S")))}) 
+data$weekday <- lapply(datetimes, weekdays) 
+
+data$year <- as.integer(data$year)
+data$month <- as.integer(data$month)
+data$day <- as.integer(data$day)
+data$hour <- as.integer(data$hour)
+data$minute <- as.integer(data$minute)
+data$second <- as.integer(data$second)
+data$weekday <- as.character(data$weekday)
+```
+
+```{r}
+datetimes <- lapply(
+  data$updatedAt,
+  function(x){return(strptime(x, "%Y-%m-%dT%H:%M:%S"))}
+)
+data$year_upd <- lapply(datetimes, function(x){return(as.numeric(format(x, "%Y")))}) 
+data$month_upd <- lapply(datetimes, function(x){return(as.numeric(format(x, "%m")))})
+data$day_upd <- lapply(datetimes, function(x){return(as.numeric(format(x, "%d")))})
+data$hour_upd <- lapply(datetimes, function(x){return(as.numeric(format(x, "%H")))}) 
+data$minute_upd <-lapply(datetimes, function(x){return(as.numeric(format(x, "%M")))}) 
+data$second_upd <- lapply(datetimes, function(x){return(as.numeric(format(x, "%S")))}) 
+data$weekday_upd <- lapply(datetimes, weekdays) 
+```
+```{r}
+data$year_upd <- as.integer(data$year_upd)
+data$month_upd <- as.integer(data$month_upd)
+data$day_upd <- as.integer(data$day_upd)
+data$hour_upd <- as.integer(data$hour_upd)
+data$minute_upd <- as.integer(data$minute_upd)
+data$second_upd <- as.integer(data$second_upd)
+data$weekday_upd <- as.character(data$weekday_upd)
+```
+
+```{r}
+data$spam <- mapvalues(data$moderationStatus, from = c(NA, 'likelySpam'), to = c(0,1))
+```
+
+
+```{r}
+dbWriteTable(db, "comments", data)
+```
+
+Ок, теперь теги
+
+```{sql connection=}
+CREATE TABLE `tags` (
+	`id`	INTEGER PRIMARY KEY AUTOINCREMENT,
+	`tag`	TEXT
+);
+
+INSERT INTO tags (tag)
+SELECT DISTINCT tag FROM tags_junk;
+
+CREATE TABLE `video_to_tags` (
+	`id_video`	INTEGER,
+	`id_tag`	INTEGER
+);
+
+INSERT INTO video_to_tags (id_video, id_tag)
+SELECT video_meta.id as id_video, tags.id as id_tag
+FROM tags_junk
+	JOIN video_meta ON video_meta.youtube_id = tags_junk.vid
+	JOIN tags ON tags_junk.tag = tags.tag;
+```
+
+
+```{r}
+
+data <- dbGetQuery(
+  db, "SELECT id, title, description FROM video_meta;")
+
+data$title <- lapply(data$title, replace_url)
+data$description <-lapply(data$description, replace_url)
+
+data$title <- lapply(data$title, mystem)
+data$description <- lapply(data$description, mystem)
+```
+
+```{r}
+data$title <- as.character(data$title)
+data$description <- as.character(data$description)
+dbWriteTable(db, "mystem_meta", data)
+```
+
+```{r}
+
+data <- dbGetQuery(
+  db, "SELECT id, text FROM comments;")
+
+data$text <- lapply(data$text, replace_url)
+data$m_text <- lapply(data$text, mystem)
+```
+
+```{r}
+data$m_text <- as.character(data$m_text)
+dbWriteTable(db, "mystem_comment", data)
+```
