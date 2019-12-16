@@ -11,11 +11,7 @@ library(shiny)
 
 # Define UI for application that draws a histogram
 shinyUI(fluidPage(
-
-    # Application title
-    #titlePanel('Анализ YouTube-канала "Мама отличника"'),
-    sidebarLayout(
-      sidebarPanel(),
-      mainPanel(uiOutput('main'))
-    )
+  theme = "styles.css",
+  titlePanel('Анализ YouTube-канала "Мама отличника"'),
+  uiOutput('main')
 ))

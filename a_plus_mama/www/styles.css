@@ -1,0 +1,45 @@
+.one-block{
+	padding-bottom: 15px;
+	padding-top: 15px;
+}
+
+.subblock{
+	padding-bottom: 15px;
+	padding-top: 15px;
+}
+
+h3{
+	padding-bottom: 30px;
+	padding-top: 30px;
+	text-align: center;
+}
+
+h4{
+	padding-bottom: 15px;
+	padding-top: 15px;
+	text-align: center;
+}
+
+b{
+	padding-bottom: 10px;
+}
+
+.error-div{
+  padding: 20px;
+  background-color: #FEDFED;
+}
+
+.questions{
+  text-align: justify;
+  padding: 50px;
+  padding-top: 20px;
+}
+
+#downloadDataCsv, #downloadDataXlsx{
+  display: block;
+  margin: 0 auto;
+}
+
+#main {
+  padding: 10%;
+}
