@@ -31,8 +31,8 @@ load_top_authors <- function() {
     return (data)
 }
 scatter_video_ld <- function(data){
-    data$likeCount <- sapply(data$likeCount, log)
-    data$dislikeCount <- sapply(data$dislikeCount, log)
+    # data$likeCount <- sapply(data$likeCount, log)
+    # data$dislikeCount <- sapply(data$dislikeCount, log)
     data$year <- as.character(data$year)
     plot_ly(
         data = data, type = 'scatter', mode = 'markers',
@@ -40,13 +40,13 @@ scatter_video_ld <- function(data){
         x = data$likeCount, y = data$dislikeCount,
         colors=c('#15983D', '#EE0011')
     ) %>% layout(
-        yaxis = list(title='Количество дизлайков (log)'),
-        xaxis = list(title = "Количество лайков (log)")
+        yaxis = list(title='Количество дизлайков (log)', type = "log"),
+        xaxis = list(title = "Количество лайков (log)", type = "log")
     ) %>% config(displayModeBar = F)}
 
 scatter_video_vl <- function(data){
-    data$likeCount <- sapply(data$likeCount, log)
-    data$viewCount <- sapply(data$viewCount, log)
+    # data$likeCount <- sapply(data$likeCount, log)
+    # data$viewCount <- sapply(data$viewCount, log)
     data$year <- as.character(data$year)
     plot_ly(
         data = data, type = 'scatter', mode = 'markers',
@@ -54,8 +54,8 @@ scatter_video_vl <- function(data){
         x = data$viewCount, y = data$likeCount,
         colors=c('#149BED', '#FA6B09')
     ) %>% layout(
-        yaxis = list(title='Количество лайков (log)'),
-        xaxis = list(title = "Количество просмотров (log)")
+        yaxis = list(title='Количество лайков (log)', type = "log"),
+        xaxis = list(title = "Количество просмотров (log)", type = "log")
     ) %>% config(displayModeBar = F)}
 
 video_time <- function(data){
@@ -166,6 +166,23 @@ plot_wordcloud <- function(min_freq = 10){
     wordcloud2(data = df, fontFamily="Arial", rotateRatio=0, color = df$color)
 }
 
+# тут мог бы быть еще один вордклауд, но есть конфликты известные и так не работает
+# get_data_emoji <- function(min_freq){
+#     db <- dbConnect(SQLite(), 'test_db.db')
+#     df <- dbGetQuery(db, sprintf(
+#         "SELECT name, freq FROM emojis
+#     WHERE freq > %s
+#     ORDER BY freq DESC;", min_freq))
+#     dbDisconnect(db)
+#     return (df)
+# }
+# plot_wordcloud_emojis <- function(min_freq = 10){
+#     df <- get_data_emoji(min_freq)
+#     df$freq <- unlist(lapply(df$freq, function(x){return (log(x, 24))}))
+#     df$color <- sample(color_arr, length(df$freq), replace = TRUE, prob = NULL)
+#     wordcloud2(data = df, fontFamily="Arial", rotateRatio=0, color = df$color)
+# }
+
 # ============================== Server ==============================
 
 shinyServer(function(input, output) {
@@ -178,16 +195,14 @@ shinyServer(function(input, output) {
     output$scatter_video_vl <- renderPlotly({scatter_video_vl(video_meta_data)})
     output$video_time <- renderPlotly({video_time(video_meta_data)})
     output$video_duration <- renderPlotly({video_duration(video_meta_data)})
-    
     output$top_authors <- renderDataTable({datatable(load_top_authors())})
     output$wc <- renderWordcloud2({plot_wordcloud(10)})
-    
     output$scatter_tags_in_time_print <- renderPlotly({
         input$run_tags
         tags <- isolate(input$tags)
         scatter_tags_in_time_print(tags)
     })
-    
+
     output$main <- renderUI({
         tagList(
             tags$div(
@@ -222,7 +237,7 @@ shinyServer(function(input, output) {
                 ),
                 tags$div(
                     class = 'sub-block',
-                    plotlyOutput('scatter_tags_in_time_print', height = 200),
+                    plotlyOutput('scatter_tags_in_time_print', height = 300),
                 )
             ),
             tags$div(
@@ -236,7 +251,8 @@ shinyServer(function(input, output) {
             ),
             tags$div(
                 class = 'one-block',
-                
+                includeMarkdown("./md/emojis.md"),
+                img(src='wc_emoji.png', align = "center")
             ),
             tags$div(
                 class = 'one-block',
