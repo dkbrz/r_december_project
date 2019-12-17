@@ -5,6 +5,7 @@ library(RSQLite)
 library(wordcloud2)
 library(RColorBrewer)
 library(DT)
+library(markdown)
 # setwd('/home/dkbrz/github/r_december_project/a_plus_mama/')
 
 
